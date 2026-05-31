@@ -1,0 +1,17 @@
+[project]
+name = "paperacquire"
+version = "0.1.0"
+description = "Project-scoped paper acquisition and citation-graph tooling with tagging."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+pa = "paperacquire.cli:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["paperacquire", "paperacquire.sources"]
