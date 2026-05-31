@@ -54,3 +54,20 @@ def request_text(url: str, headers: dict[str, str] | None = None, timeout: int =
 
 def request_json(url: str, headers: dict[str, str] | None = None, timeout: int = 30, retries: int = 3) -> Any:
     return json.loads(request_text(url, headers=headers, timeout=timeout, retries=retries))
+
+
+def jget(obj: Any, path: str, default: Any = None) -> Any:
+    """Navigate a nested JSON object along a dot-separated key path.
+
+    ``jget(data, 'result.hits.hit', [])`` is equivalent to
+    ``(data.get('result') or {}).get('hits') or {}).get('hit', [])``
+    but stops and returns ``default`` at the first non-dict step.
+    """
+    node: Any = obj
+    for key in path.split("."):
+        if not isinstance(node, dict):
+            return default
+        node = node.get(key)
+        if node is None:
+            return default
+    return node if node is not None else default
