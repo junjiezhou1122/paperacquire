@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import Callable
 
 from .bibliography import resolve_reference_candidates_for_paper, resolved_candidate_to_graph_node
@@ -56,17 +57,18 @@ def expand_graph(input_value: str, include_references: bool = True, include_cita
     providers_used: set[str] = set()
 
     if include_references:
-        for node in _fetch_local_references(seed, limit):
-            providers_used.add("local_markdown")
-            _upsert_node(graph, node)
-            if _upsert_edge(graph, GraphEdge(source_key=seed.key, target_key=node.key, edge_type="reference", providers=["local_markdown"])):
-                added_references += 1
-
         for provider, fetcher in (("openalex", fetch_openalex_references), ("semantic_scholar", fetch_semantic_references)):
             for node in _safe_fetch(fetcher, seed, limit):
                 providers_used.add(provider)
                 _upsert_node(graph, node)
                 if _upsert_edge(graph, GraphEdge(source_key=seed.key, target_key=node.key, edge_type="reference", providers=[provider])):
+                    added_references += 1
+
+        if os.environ.get("PAPER_ACQUIRE_GRAPH_LOCAL_REFS", "").strip() in {"1", "true", "yes"}:
+            for node in _fetch_local_references(seed, limit):
+                providers_used.add("local_markdown")
+                _upsert_node(graph, node)
+                if _upsert_edge(graph, GraphEdge(source_key=seed.key, target_key=node.key, edge_type="reference", providers=["local_markdown"])):
                     added_references += 1
 
     if include_citations:

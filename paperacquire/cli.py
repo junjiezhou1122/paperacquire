@@ -746,6 +746,13 @@ def build_parser() -> argparse.ArgumentParser:
     pdf_parser.add_argument("input")
     pdf_parser.set_defaults(func=cmd_pdf_link)
 
+    # Workspace commands
+    from . import workspace_cli as _wc
+    _wc.build_workspace_parser(sub)   # "pa workspace <sub>"
+    # "pa ws <sub>" = alias for "pa workspace <sub>"
+    _ws_sp = sub.add_parser("ws", help="Alias for 'pa workspace <subcommand>'").add_subparsers()
+    _wc.build_workspace_parser(_ws_sp, skip_top_level=True)
+
     return parser
 
 

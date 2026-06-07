@@ -78,3 +78,27 @@ Install the `pa` command globally:
 ```bash
 pipx install -e ~/agent/tools/paperacquire
 ```
+
+## Codex skill distribution
+
+This repo includes a portable Codex skill:
+
+```text
+skills/paper-acquire/
+```
+
+Install it with Codex's GitHub skill installer:
+
+```bash
+python ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
+  --repo junjiezhou1122/paperacquire \
+  --path skills/paper-acquire
+```
+
+Then restart Codex so the skill is discovered.
+
+This project is distributed as a CLI plus a thin wrapper skill, not a plugin.
+That is intentional: `paperacquire` does not need an MCP server, browser app, or
+multi-skill plugin bundle. The skill tells agents how to use `pa`; the Python
+package remains the source of truth for acquisition, search, workspace, and graph
+logic.

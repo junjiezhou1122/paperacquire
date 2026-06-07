@@ -60,10 +60,11 @@ class PathResolutionTests(unittest.TestCase):
         os.environ.pop("PAPER_ACQUIRE_HOME", None)
         with TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
-            (root / ".paperacquire").mkdir()
+            marker_dir = root / ".paperacquire"
+            marker_dir.mkdir()
             os.chdir(root)
             paths, _, _ = _fresh_modules()
-            self.assertEqual(paths.resolve_home(), root)
+            self.assertEqual(paths.resolve_home(), marker_dir)
 
 
 class TaggingTests(unittest.TestCase):

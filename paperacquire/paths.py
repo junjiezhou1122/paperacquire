@@ -80,8 +80,9 @@ def _discover_home(start: Path) -> Path | None:
             resolved = _read_marker_home(marker_file)
             if resolved is not None:
                 return resolved
-        if (parent / MARKER_DIR).is_dir():
-            return parent
+        marker_dir = parent / MARKER_DIR
+        if marker_dir.is_dir():
+            return marker_dir
     return None
 
 
