@@ -1,5 +1,7 @@
 # paperacquire
 
+[![skills.sh](https://skills.sh/b/junjiezhou1122/paperacquire)](https://skills.sh/junjiezhou1122/paperacquire)
+
 Project-scoped paper acquisition and citation-graph tooling, with first-class
 tagging. Forked from AgentRG's `paper_acquisition` and improved to fix two real
 pain points found while building a literature base for a research paper:
@@ -97,6 +99,12 @@ python ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github
 ```
 
 Then restart Codex so the skill is discovered.
+
+Install through the skills.sh / Vercel skills CLI:
+
+```bash
+npx skills add junjiezhou1122/paperacquire --skill paper-acquire
+```
 
 This project is distributed as a CLI plus a thin wrapper skill, not a plugin.
 That is intentional: `paperacquire` does not need an MCP server, browser app, or
