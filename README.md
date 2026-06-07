@@ -92,7 +92,8 @@ Install it with Codex's GitHub skill installer:
 ```bash
 python ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
   --repo junjiezhou1122/paperacquire \
-  --path skills/paper-acquire
+  --path skills/paper-acquire \
+  --method git
 ```
 
 Then restart Codex so the skill is discovered.
