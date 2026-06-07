@@ -7,15 +7,19 @@ from .models import SearchResult
 from .normalize import strip_version
 from .sources.alphaxiv import search_papers as search_alphaxiv
 from .sources.crossref import search_papers as search_crossref
+from .sources.dblp import search_papers as search_dblp
 from .sources.huggingface import search_papers as search_huggingface
 from .sources.openalex import search_papers as search_openalex
+from .sources.openreview_adaptive import search_papers as search_openreview
 
 
 PROVIDERS = {
     "alphaxiv": search_alphaxiv,
     "openalex": search_openalex,
     "crossref": search_crossref,
+    "dblp": search_dblp,
     "huggingface": search_huggingface,
+    "openreview": search_openreview,
 }
 TOKEN_RE = re.compile(r"[a-z0-9]+")
 

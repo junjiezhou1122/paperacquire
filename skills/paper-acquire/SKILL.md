@@ -1,13 +1,14 @@
 ---
 name: paper-acquire
-description: Use the paperacquire CLI (`pa`) to search, acquire, inspect, tag, organize, and preview research papers. Use when working with arXiv IDs, Hugging Face paper pages, AlphaXiv/OpenAlex/CrossRef/DBLP search, bibliographies, citation/reference graphs, paper workspaces, claim-to-paper maps, or reference packets.
-argument-hint: <search|acquire|list|show|where|tag|collection|workspace|ws|references|citations|expand|extract-refs|acquire-refs|preview-build> [args]
+description: Use the paperacquire CLI (`pa`) to search, acquire, inspect, tag, organize, and preview research papers. Use when working with arXiv IDs, conference papers, AlphaXiv/OpenAlex/CrossRef/DBLP/Hugging Face/OpenReview search, bibliographies, citation/reference graphs, paper workspaces, claim-to-paper maps, or reference packets.
+argument-hint: <search|venue|acquire|list|show|where|tag|collection|workspace|ws|references|citations|expand|extract-refs|acquire-refs|preview-build> [args]
 ---
 
 # Paper Acquire
 
 Use the `paperacquire` CLI as the source of truth for paper ingestion,
-literature search, bibliography expansion, and workspace-based paper tracking.
+literature search, conference/year search, bibliography expansion, and
+workspace-based paper tracking.
 
 Entrypoint:
 
@@ -40,7 +41,14 @@ Search papers:
 
 ```bash
 pa search "long-term memory agents" --limit 10
-pa search "temporal memory retrieval" --sources huggingface,openalex
+pa search "temporal memory retrieval" --sources huggingface,openalex,dblp,openreview
+```
+
+Search conference papers:
+
+```bash
+pa venue ICLR 2025 --source openreview --limit 50
+pa venue NeurIPS 2024 --source all --ingest
 ```
 
 Inspect local library:
@@ -104,9 +112,9 @@ to see the active storage root.
 ## Working Rules
 
 - Prefer `pa search` or `pa ingest-feeds` before inventing related work.
+- Prefer `pa venue <conference> <year>` when collecting top-conference papers.
 - Prefer `pa workspace` for multi-project paper tracking.
 - Prefer `pa references`, `pa citations`, and `pa expand` for graph growth.
 - Prefer `pa acquire-refs` when expanding from a local bibliography.
 - Do not reimplement acquisition logic inside prompts; use the CLI.
 - Treat search results as routing signals, not truth. Verify important claims.
-

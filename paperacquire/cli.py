@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -25,6 +26,8 @@ from .sources.alphaxiv import (
 from .sources.arxiv import get_arxiv_info
 from .sources.huggingface import HuggingFaceFetchResult, fetch_daily_papers as fetch_huggingface_daily_papers, fetch_paper as fetch_huggingface_paper
 from .sources.openalex import fetch_work as fetch_openalex_work
+from .sources.dblp import search_papers_by_venue as search_dblp_venue
+from .sources.openreview_adaptive import search_papers_by_venue as search_openreview_venue
 
 
 HF_ENRICH_FIELDS = (
@@ -456,6 +459,96 @@ def cmd_search(args: argparse.Namespace) -> None:
     print(json.dumps(results, ensure_ascii=False, indent=2))
 
 
+VENUE_PROVIDERS = {
+    "openreview": search_openreview_venue,
+    "dblp": search_dblp_venue,
+}
+
+
+def search_venue_papers(conference: str, year: int, *, limit: int = 25, source: str = "all") -> list[dict]:
+    requested_sources = list(VENUE_PROVIDERS) if source == "all" else [source]
+    candidates: list[dict] = []
+    for source_name in requested_sources:
+        provider = VENUE_PROVIDERS.get(source_name)
+        if provider is None:
+            continue
+        try:
+            results = provider(conference, year, limit=limit)
+        except Exception:
+            continue
+        for result in results:
+            item = result.to_dict()
+            item["venue_query"] = {"conference": conference, "year": year, "source": source_name}
+            candidates.append(item)
+    return _dedupe_feed_candidates(candidates)[:limit]
+
+
+def _record_id_from_candidate(candidate: dict) -> str:
+    identifiers = candidate.get("identifiers", {}) or {}
+    paper_id = (candidate.get("paper_id") or "").strip()
+    if paper_id:
+        return paper_id
+    for key, prefix in (("doi", "doi"), ("openreview_id", "openreview"), ("dblp_key", "dblp")):
+        value = str(identifiers.get(key, "") or "").strip()
+        if value:
+            return f"{prefix}:{value}"
+    title_key = hashlib.sha1(_normalize_title_key(candidate.get("title", "")).encode("utf-8")).hexdigest()[:16]
+    return f"title:{title_key}"
+
+
+def _record_from_candidate(candidate: dict, *, source_input: str) -> PaperRecord:
+    return PaperRecord(
+        paper_id=_record_id_from_candidate(candidate),
+        title=candidate.get("title", ""),
+        source=candidate.get("source", ""),
+        sources=candidate.get("sources", []) or ([candidate.get("source")] if candidate.get("source") else []),
+        source_input=source_input,
+        canonical_url=candidate.get("canonical_url", ""),
+        authors=candidate.get("authors", []),
+        identifiers=candidate.get("identifiers", {}) or {},
+        venue=candidate.get("venue", ""),
+        year=candidate.get("year"),
+        citation_count=candidate.get("citation_count"),
+        pdf_url=candidate.get("pdf_url", ""),
+        landing_page_url=candidate.get("landing_page_url", ""),
+    )
+
+
+def _ingest_search_candidates(candidates: list[dict], *, source_input: str) -> dict:
+    ensure_storage_dirs()
+    new_papers: list[str] = []
+    existing_papers: list[str] = []
+    failed: list[dict[str, str]] = []
+    for candidate in candidates:
+        try:
+            record = _record_from_candidate(candidate, source_input=source_input)
+            existing = get_record(record.paper_id)
+            stored = upsert_record(record)
+        except Exception as exc:
+            failed.append({"title": candidate.get("title", ""), "error": str(exc)})
+            continue
+        if existing is None:
+            new_papers.append(stored.get("paper_id", record.paper_id))
+        else:
+            existing_papers.append(stored.get("paper_id", record.paper_id))
+    return {
+        "scanned": len(candidates),
+        "new_papers": sorted(new_papers),
+        "existing_papers": sorted(existing_papers),
+        "failed": failed,
+    }
+
+
+def cmd_venue(args: argparse.Namespace) -> None:
+    results = search_venue_papers(args.conference, args.year, limit=args.limit, source=args.source)
+    if not args.ingest:
+        print(json.dumps(results, ensure_ascii=False, indent=2))
+        return
+    summary = _ingest_search_candidates(results, source_input=f"venue:{args.conference}:{args.year}:{args.source}")
+    summary["results"] = results
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+
+
 def _normalize_title_key(title: str) -> str:
     return " ".join(part for part in "".join(char.lower() if char.isalnum() else " " for char in title).split() if part)
 
@@ -653,7 +746,7 @@ def cmd_pdf_link(args: argparse.Namespace) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="AgentRG paper acquisition CLI")
+    parser = argparse.ArgumentParser(description="paperacquire research paper library CLI")
     sub = parser.add_subparsers(dest="command", required=True)
 
     acquire_parser = sub.add_parser("acquire", help="Acquire a paper and update the index")
@@ -705,8 +798,16 @@ def build_parser() -> argparse.ArgumentParser:
     search_parser = sub.add_parser("search", help="Search papers across supported sources")
     search_parser.add_argument("query")
     search_parser.add_argument("--limit", type=int, default=20)
-    search_parser.add_argument("--sources", help="Comma-separated subset: alphaxiv,openalex,crossref,huggingface")
+    search_parser.add_argument("--sources", help="Comma-separated subset: alphaxiv,openalex,crossref,dblp,huggingface,openreview")
     search_parser.set_defaults(func=cmd_search)
+
+    venue_parser = sub.add_parser("venue", help="Search papers from a conference/year")
+    venue_parser.add_argument("conference", help="Conference acronym, e.g. ICLR, NeurIPS, ACL")
+    venue_parser.add_argument("year", type=int)
+    venue_parser.add_argument("--limit", type=int, default=25)
+    venue_parser.add_argument("--source", choices=["all", "openreview", "dblp"], default="all")
+    venue_parser.add_argument("--ingest", action="store_true", help="Store returned metadata records in the local index")
+    venue_parser.set_defaults(func=cmd_venue)
 
     ingest_feeds_parser = sub.add_parser("ingest-feeds", help="Ingest papers from supported high-signal feeds")
     ingest_feeds_parser.add_argument("--limit", type=int, default=20)

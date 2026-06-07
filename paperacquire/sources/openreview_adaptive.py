@@ -19,6 +19,7 @@ or submission number.
 
 from __future__ import annotations
 
+import re
 import urllib.parse
 
 from ..http import NotFoundError, jget, request_json
@@ -38,6 +39,14 @@ CONFERENCE_CONFIG = {
 }
 
 
+def _normalize_conference_name(conference: str) -> str:
+    raw = conference.strip()
+    for known in CONFERENCE_CONFIG:
+        if raw.lower() == known.lower():
+            return known
+    return raw.upper()
+
+
 def _conference_api_version(conference: str, year: int | None = None) -> int:
     """Decide whether to use OpenReview v1 or v2 API.
 
@@ -45,7 +54,7 @@ def _conference_api_version(conference: str, year: int | None = None) -> int:
     NeurIPS from 2024 onwards.  Older conferences or 2023 and earlier use
     the legacy v1 API.
     """
-    conf = conference.strip().title()
+    conf = _normalize_conference_name(conference)
     api_version = CONFERENCE_CONFIG.get(conf, {}).get("api", 2)
     if api_version == 1:
         return 1
@@ -57,13 +66,13 @@ def _conference_api_version(conference: str, year: int | None = None) -> int:
 def _build_invitation(conference: str, year: int | None, paper_number: str | None) -> str:
     """Build the OpenReview invitation string for a venue.
 
-    For search by venue, the invitation format is:
-      <venue>.cc/<year>/Conference (v2) or <venue>.cc/<year>/Conference (v1)
+    For search by venue, the invitation format is usually:
+      <venue>.cc/<year>/Conference/-/Submission
 
     For fetch by paper number, the invitation is embedded in the note ID and
     the full invitation name of the note is returned in the response.
     """
-    conf = conference.strip().title()
+    conf = _normalize_conference_name(conference)
     if conf not in CONFERENCE_CONFIG:
         return ""
     suffix = CONFERENCE_CONFIG[conf].get("v2_invitation", "ICLR.cc")
@@ -72,7 +81,7 @@ def _build_invitation(conference: str, year: int | None, paper_number: str | Non
         # When we have a note ID/number we don't need the invitation prefix;
         # the note itself knows its invitation.
         return ""
-    return f"{suffix}/{year_str}/Conference" if year_str else suffix
+    return f"{suffix}/{year_str}/Conference/-/Submission" if year_str else suffix
 
 
 # ---------------------------------------------------------------------------
@@ -87,39 +96,47 @@ def search_papers_by_venue(conference: str, year: int, limit: int = 25) -> list[
     """
     api_version = _conference_api_version(conference, year)
     base = V2_BASE if api_version == 2 else V1_BASE
-    invitation = _build_invitation(conference, year, None)
-    if not invitation:
+    primary_invitation = _build_invitation(conference, year, None)
+    if not primary_invitation:
         return []
 
     all_notes: list[dict] = []
     cursor = ""
-    params_common = {
-        "invitation": invitation,
-        "limit": min(limit, 50),
-        "details": "all",
-    }
+    invitation_candidates = [
+        primary_invitation,
+        primary_invitation.replace("/-/Submission", "/-/Blind_Submission"),
+        primary_invitation.replace("/-/Submission", ""),
+    ]
 
-    while len(all_notes) < limit:
-        params = dict(params_common)
-        if cursor:
-            params["cursor"] = cursor
-        url = f"{base}/notes?{urllib.parse.urlencode(params)}"
-        try:
-            data = request_json(url)
-        except NotFoundError:
-            break
+    for invitation in invitation_candidates:
+        cursor = ""
+        while len(all_notes) < limit:
+            params = {
+                "invitation": invitation,
+                "limit": min(limit, 50),
+                "details": "all",
+            }
+            if cursor:
+                params["cursor"] = cursor
+            url = f"{base}/notes?{urllib.parse.urlencode(params)}"
+            try:
+                data = request_json(url)
+            except NotFoundError:
+                break
 
-        notes = jget(data, "notes", [])
-        if not notes:
-            break
-        all_notes.extend(notes)
+            notes = jget(data, "notes", [])
+            if not notes:
+                break
+            all_notes.extend(notes)
 
-        # OpenReview paginates with a 'cursor' field
-        cursor = data.get("cursor", "") or ""
-        if not cursor:
-            break
+            # OpenReview paginates with a 'cursor' field
+            cursor = data.get("cursor", "") or ""
+            if not cursor:
+                break
 
-        if len(all_notes) >= limit:
+            if len(all_notes) >= limit:
+                break
+        if all_notes:
             break
 
     results: list[SearchResult] = []
@@ -200,12 +217,13 @@ def _note_to_result(note: dict) -> SearchResult | None:
         return None
 
     # Authors
-    authors_raw = content.get("authors", {})
+    authors_raw = _field_value(content, "authors")
     if isinstance(authors_raw, dict):
-        # Sometimes authors is a list-of-dict with a "value" key
-        authors = [v.get("value", "") or "" for v in authors_raw.values()]
+        authors = [str(v.get("value", "") or "") for v in authors_raw.values() if isinstance(v, dict)]
     elif isinstance(authors_raw, list):
-        authors = [v.get("value", "") or str(v) for v in authors_raw]
+        authors = [str(v.get("value", "") or str(v)) if isinstance(v, dict) else str(v) for v in authors_raw]
+    elif isinstance(authors_raw, str):
+        authors = [authors_raw]
     else:
         authors = []
 
@@ -213,9 +231,7 @@ def _note_to_result(note: dict) -> SearchResult | None:
     abstract = _str_field(content, "abstract") or ""
 
     # Year — prefer the venue year, fall back to cdate year
-    year_raw = content.get("year", {})
-    if isinstance(year_raw, dict):
-        year_raw = year_raw.get("value", "") or ""
+    year_raw = _field_value(content, "year")
     try:
         year = int(year_raw) if year_raw else None
     except (ValueError, TypeError):
@@ -223,6 +239,8 @@ def _note_to_result(note: dict) -> SearchResult | None:
 
     # Venue
     venue = _str_field(content, "venue") or ""
+    if year is None:
+        year = _extract_year(f"{venue} {note.get('domain', '')}")
 
     # Decision / rating
     decision = _str_field(content, "decision") or ""
@@ -244,6 +262,8 @@ def _note_to_result(note: dict) -> SearchResult | None:
         pdf_url = pdf_field.get("value", "") or ""
     elif pdf_field and str(pdf_field).startswith("http"):
         pdf_url = str(pdf_field)
+    if pdf_url.startswith("/"):
+        pdf_url = f"https://openreview.net{pdf_url}"
     if not pdf_url and or_forum:
         pdf_url = f"https://openreview.net/pdf?id={or_forum}"
 
@@ -265,7 +285,7 @@ def _note_to_result(note: dict) -> SearchResult | None:
         title=title,
         source="openreview",
         sources=["openreview"],
-        paper_id=arxiv_id or or_id,
+        paper_id=arxiv_id,
         identifiers={
             "openreview_id": or_id,
             "openreview_number": number,
@@ -288,7 +308,21 @@ def _str_field(content: dict, key: str) -> str:
     OpenReview content fields are typed: a plain string comes back as-is,
     but a field with metadata (author,數值) comes back as ``{"value": "..."}``.
     """
+    val = _field_value(content, key)
+    if isinstance(val, list):
+        return ", ".join(str(item) for item in val if item)
+    return str(val) if val else ""
+
+
+def _field_value(content: dict, key: str):
     val = content.get(key, "")
     if isinstance(val, dict):
         return val.get("value", "") or ""
-    return str(val) if val else ""
+    return val
+
+
+def _extract_year(text: str) -> int | None:
+    match = re.search(r"\b(19|20)\d{2}\b", text or "")
+    if not match:
+        return None
+    return int(match.group(0))

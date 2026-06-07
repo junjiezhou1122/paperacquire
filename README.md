@@ -2,17 +2,13 @@
 
 [![skills.sh](https://skills.sh/b/junjiezhou1122/paperacquire)](https://skills.sh/junjiezhou1122/paperacquire)
 
-Project-scoped paper acquisition and citation-graph tooling, with first-class
-tagging. Forked from AgentRG's `paper_acquisition` and improved to fix two real
-pain points found while building a literature base for a research paper:
+Project-scoped paper acquisition, conference-paper search, citation-graph
+expansion, and workspace tracking for research projects.
 
-1. **No project isolation.** The original hard-wired a single global library
-   (`AgentRG/alphaxiv_papers`), so papers from every project piled into one
-   index. This fork resolves the storage home per project.
-2. **No way to slice the library by your own dimensions.** The only metadata was
-   auto-generated `source_topics` (e.g. `agents`, `continual-learning`) that tag
-   nearly every memory paper identically. This fork adds first-class `tags` and
-   `collection` fields plus CLI commands to set and filter them.
+The CLI keeps paper metadata, notes, local markdown, tags, collections,
+claim-to-paper maps, and graph metadata in a project-local library. It is useful
+for building a literature base that an agent can search, expand, verify, and
+reuse across long research tasks.
 
 ## Storage resolution
 
@@ -41,12 +37,24 @@ pa where   # confirms home = <project>/papers
 
 ## Commands
 
-Acquisition / graph (unchanged from upstream): `acquire`, `search`,
-`ingest-feeds`, `extract-refs`, `acquire-refs`, `references`, `citations`,
-`expand`, `backfill`, `reclassify`, `enrich-hf`, `verify`, `preview-build`,
-`pdf-link`, `list`, `show`.
+Core commands:
 
-New in this fork:
+```bash
+pa acquire 2403.06801                              # acquire one arXiv-backed paper
+pa search "long-term memory agents" --limit 10     # query search
+pa venue ICLR 2025 --source openreview --limit 50  # conference/year search
+pa venue NeurIPS 2024 --source all --ingest        # store venue metadata in index
+pa ingest-feeds --sources alphaxiv,huggingface     # ingest high-signal feeds
+pa references 2403.06801                           # fetch references
+pa citations 2403.06801                            # fetch citations
+pa expand 2403.06801 --limit 25                    # fetch both directions
+pa extract-refs 2403.06801                         # parse local bibliography
+pa acquire-refs 2403.06801 --limit 12              # acquire resolved references
+pa preview-build                                   # build local HTML preview
+pa verify                                          # verify index and files
+```
+
+Library organization:
 
 ```bash
 pa where                                   # show active library + paths
@@ -60,6 +68,40 @@ pa list --collection memevo-related         # filter by collection
 
 Tags and collection survive re-acquisition (`acquire` merges, it never wipes
 manual metadata).
+
+Workspace tracking:
+
+```bash
+pa workspace new memevo --title "MemEvo Paper"
+pa workspace use memevo
+pa workspace acquire 2403.06801 2502.12110
+pa workspace papers
+pa workspace state --paper-id 2403.06801 --new-state read
+pa workspace position --claim C6-evolution --papers 2403.06801,2502.12110
+pa workspace note 2403.06801 --write "# Notes"
+```
+
+`pa ws <cmd>` is an alias for `pa workspace <cmd>`.
+
+## Search sources
+
+`pa search` supports:
+
+```text
+alphaxiv, openalex, crossref, dblp, huggingface, openreview
+```
+
+`pa venue` supports:
+
+```text
+openreview, dblp, all
+```
+
+`pa ingest-feeds` supports:
+
+```text
+alphaxiv, huggingface
+```
 
 ## Suggested tagging scheme
 

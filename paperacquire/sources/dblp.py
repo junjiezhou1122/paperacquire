@@ -17,8 +17,12 @@ from ..http import NotFoundError, jget, request_json
 from ..models import SearchResult
 from ..normalize import extract_doi, strip_version
 
-DBLP_SEARCH = "https://dblp.org/search/publ/api"
 DBLP_BASE = "https://dblp.org"
+DBLP_SEARCH_FALLBACKS = [
+    "https://dblp.org/search/publ/api",
+    "https://dblp.dagstuhl.de/search/publ/api",
+    "https://dblp.uni-trier.de/search/publ/api",
+]
 
 
 def search_papers(query: str, limit: int = 10) -> list[SearchResult]:
@@ -28,10 +32,9 @@ def search_papers(query: str, limit: int = 10) -> list[SearchResult]:
     conference papers) with accurate venue and year.  Venue values are
     abbreviated venue strings such as "NeurIPS", "ICML", "ACL", "AAAI".
     """
-    params = urllib.parse.urlencode({"q": query, "format": "json", "h": min(limit, 50)})
-    try:
-        data = request_json(f"{DBLP_SEARCH}?{params}")
-    except NotFoundError:
+    params = urllib.parse.urlencode({"q": query, "format": "json", "h": min(limit, 200)})
+    data = _request_search_json(params)
+    if not data:
         return []
 
     hits = jget(data, "result.hits.hit", [])
@@ -42,6 +45,34 @@ def search_papers(query: str, limit: int = 10) -> list[SearchResult]:
         if paper:
             papers.append(paper)
     return papers
+
+
+def search_papers_by_venue(conference: str, year: int, limit: int = 25) -> list[SearchResult]:
+    """Search DBLP for papers from a venue/year and keep exact venue/year hits."""
+    venue = conference.strip()
+    if not venue:
+        return []
+
+    # DBLP's public search endpoint is text-oriented, so over-fetch a compact
+    # query and then require the structured venue/year fields to match.
+    query_limit = max(limit * 5, 50)
+    candidates = search_papers(f"{venue} {year}", limit=min(query_limit, 200))
+    wanted_venue = _normalize_venue(venue)
+    results: list[SearchResult] = []
+    seen: set[str] = set()
+    for paper in candidates:
+        if paper.year != year:
+            continue
+        if _normalize_venue(paper.venue) != wanted_venue:
+            continue
+        key = paper.identifiers.get("doi") or paper.canonical_url or paper.title
+        if key in seen:
+            continue
+        seen.add(key)
+        results.append(paper)
+        if len(results) >= limit:
+            break
+    return results
 
 
 def fetch_paper(identifier: str) -> SearchResult | None:
@@ -58,9 +89,8 @@ def fetch_paper(identifier: str) -> SearchResult | None:
 
 def _fetch_by_doi(doi: str) -> SearchResult | None:
     params = urllib.parse.urlencode({"q": f"doi:{doi}", "format": "json", "h": 1})
-    try:
-        data = request_json(f"{DBLP_SEARCH}?{params}")
-    except NotFoundError:
+    data = _request_search_json(params)
+    if not data:
         return None
     hits = jget(data, "result.hits.hit", [])
     for hit in hits:
@@ -72,9 +102,8 @@ def _fetch_by_doi(doi: str) -> SearchResult | None:
 
 def _fetch_by_title(title: str) -> SearchResult | None:
     params = urllib.parse.urlencode({"q": title, "format": "json", "h": 1})
-    try:
-        data = request_json(f"{DBLP_SEARCH}?{params}")
-    except NotFoundError:
+    data = _request_search_json(params)
+    if not data:
         return None
     hits = jget(data, "result.hits.hit", [])
     if not hits:
@@ -135,3 +164,18 @@ def _parse_hit(info: dict) -> SearchResult | None:
 def _doi_matches(info: dict, doi: str) -> bool:
     info_doi = (info.get("doi", "") or "").strip()
     return info_doi == doi or info_doi == f"10.1007{doi[7:]}" if doi.startswith("10.1007/") else False
+
+
+def _normalize_venue(value: str) -> str:
+    return "".join(char.lower() for char in value if char.isalnum())
+
+
+def _request_search_json(params: str) -> dict | None:
+    for endpoint in DBLP_SEARCH_FALLBACKS:
+        try:
+            return request_json(f"{endpoint}?{params}")
+        except NotFoundError:
+            return None
+        except Exception:
+            continue
+    return None
